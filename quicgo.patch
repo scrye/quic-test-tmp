@@ -1,0 +1,79 @@
+diff --git a/conn.go b/conn.go
+index 700c147..64238c7 100644
+--- a/conn.go
++++ b/conn.go
+@@ -3,6 +3,8 @@ package quic
+ import (
+ 	"net"
+ 	"sync"
++
++	"github.com/lucas-clemente/quic-go/internal/protocol"
+ )
+ 
+ type connection interface {
+@@ -52,3 +54,7 @@ func (c *conn) RemoteAddr() net.Addr {
+ func (c *conn) Close() error {
+ 	return c.pconn.Close()
+ }
++
++func InjectMTU(mtu int) {
++	protocol.MinInitialPacketSize = mtu
++}
+diff --git a/internal/protocol/protocol.go b/internal/protocol/protocol.go
+index c18a2b6..d2eb349 100644
+--- a/internal/protocol/protocol.go
++++ b/internal/protocol/protocol.go
+@@ -56,7 +56,7 @@ const MaxReceivePacketSize ByteCount = 1452
+ const DefaultTCPMSS ByteCount = 1460
+ 
+ // MinInitialPacketSize is the minimum size an Initial packet is required to have.
+-const MinInitialPacketSize = 1200
++var MinInitialPacketSize = 1200
+ 
+ // MinStatelessResetSize is the minimum size of a stateless reset packet
+ const MinStatelessResetSize = 1 /* first byte */ + 22 /* random bytes */ + 16 /* token */
+diff --git a/packet_packer.go b/packet_packer.go
+index 8a9b663..a577236 100644
+--- a/packet_packer.go
++++ b/packet_packer.go
+@@ -60,18 +60,20 @@ func (p *packedPacket) ToAckHandlerPacket() *ackhandler.Packet {
+ 
+ func getMaxPacketSize(addr net.Addr) protocol.ByteCount {
+ 	maxSize := protocol.ByteCount(protocol.MinInitialPacketSize)
+-	// If this is not a UDP address, we don't know anything about the MTU.
+-	// Use the minimum size of an Initial packet as the max packet size.
+-	if udpAddr, ok := addr.(*net.UDPAddr); ok {
+-		// If ip is not an IPv4 address, To4 returns nil.
+-		// Note that there might be some corner cases, where this is not correct.
+-		// See https://stackoverflow.com/questions/22751035/golang-distinguish-ipv4-ipv6.
+-		if udpAddr.IP.To4() == nil {
+-			maxSize = protocol.MaxPacketSizeIPv6
+-		} else {
+-			maxSize = protocol.MaxPacketSizeIPv4
++	/*
++		// If this is not a UDP address, we don't know anything about the MTU.
++		// Use the minimum size of an Initial packet as the max packet size.
++		if udpAddr, ok := addr.(*net.UDPAddr); ok {
++			// If ip is not an IPv4 address, To4 returns nil.
++			// Note that there might be some corner cases, where this is not correct.
++			// See https://stackoverflow.com/questions/22751035/golang-distinguish-ipv4-ipv6.
++			if udpAddr.IP.To4() == nil {
++				maxSize = protocol.MaxPacketSizeIPv6
++			} else {
++				maxSize = protocol.MaxPacketSizeIPv4
++			}
+ 		}
+-	}
++	*/
+ 	return maxSize
+ }
+ 
+@@ -397,7 +399,7 @@ func (p *packetPacker) writeAndSealPacket(
+ 		}
+ 		if addPaddingForInitial {
+ 			headerLen := header.GetLength(p.version)
+-			header.Length = protocol.ByteCount(header.PacketNumberLen) + protocol.MinInitialPacketSize - headerLen
++			header.Length = protocol.ByteCount(header.PacketNumberLen) + protocol.ByteCount(protocol.MinInitialPacketSize) - headerLen
+ 		} else {
+ 			// long header packets always use 4 byte packet number, so we never need to pad short payloads
+ 			length := protocol.ByteCount(sealer.Overhead()) + protocol.ByteCount(header.PacketNumberLen)
